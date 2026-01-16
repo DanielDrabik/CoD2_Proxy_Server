@@ -10,7 +10,7 @@ on:
       forward_ip:
         description: 'Forward IP address for the proxy'
         required: false
-        default: '127.0.0.1'
+        default: 'cod2_server'
 
 env:
   REGISTRY: ghcr.io
