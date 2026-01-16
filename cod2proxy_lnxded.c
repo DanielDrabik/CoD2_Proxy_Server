@@ -403,36 +403,34 @@ void *listen_thread(void *arg)
 	ListenThreadArgs *args = (ListenThreadArgs *)arg;
 	char client_ip[INET_ADDRSTRLEN];
 
+	inet_ntop(AF_INET, &args->addr.sin_addr, client_ip, sizeof(client_ip));
+
 	while(1)
 	{
 		char buffer[MAX_BUFFER_SIZE];
 		struct sockaddr_in r_addr;
 		socklen_t r_len = sizeof(r_addr);
 
+		// recvfrom blocks until data arrives or timeout (SO_RCVTIMEO) expires
 		ssize_t bytes_received = recvfrom(*(args->s_client), buffer, sizeof(buffer) - 1, 0, (struct sockaddr *)&r_addr, &r_len);
 
-		inet_ntop(AF_INET, &args->addr.sin_addr, client_ip, sizeof(client_ip));
-
-		if(bytes_received >= 0)
+		if(bytes_received < 0)
 		{
-			if(bytes_received < sizeof(buffer) - 1)
-				buffer[bytes_received] = '\0';
-			else
-			{
-				perror("recvfrom max size exceeded");
-				continue;
-			}
-		}
-		else
-		{
+			// Timeout expired (EAGAIN/EWOULDBLOCK) - client inactive, exit thread
 			if(errno == EAGAIN || errno == EWOULDBLOCK)
 				break;
-			else
-			{
-				perror("recvfrom listen_thread no data");
-				continue;
-			}
+			// Other error - log and continue waiting
+			perror("recvfrom listen_thread error");
+			continue;
 		}
+
+		if(bytes_received >= sizeof(buffer) - 1)
+		{
+			perror("recvfrom max size exceeded");
+			continue;
+		}
+
+		buffer[bytes_received] = '\0';
 
 		if(memcmp(buffer, "\xFF\xFF\xFF\xFFstatusResponse", 18) == 0 || memcmp(buffer, "\xFF\xFF\xFF\xFFinfoResponse", 16) == 0)
 		{
@@ -534,7 +532,13 @@ void *input_thread(void *arg)
 	char user_input[256];
 	while(1)
 	{
-		fgets(user_input, sizeof(user_input), stdin);
+		if(fgets(user_input, sizeof(user_input), stdin) == NULL)
+		{
+			// EOF or error on stdin (common in Docker containers)
+			// Sleep and wait instead of busy-looping
+			sleep(60);
+			continue;
+		}
 		toLowerCase(user_input);
 
 		if(strcmp(user_input, "quit\n") == 0)
